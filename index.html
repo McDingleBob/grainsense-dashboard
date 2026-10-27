@@ -116,7 +116,7 @@
     <div class="card"><h2>Kelembapan udara (%RH)</h2>
       <div class="legend"><span><i style="background:var(--s1)"></i>Ruang dalam</span><span><i style="background:var(--s2)"></i>Udara masuk</span></div>
       <div class="chart-box"><canvas id="cRh"></canvas></div></div>
-    <div class="card"><h2>Kadar air, sensor kapasitif (%)</h2><div class="chart-box"><canvas id="cSoil"></canvas></div></div>
+    <div class="card"><h2>Soil moisture, nilai mentah ADC (makin basah makin kecil)</h2><div class="chart-box"><canvas id="cSoil"></canvas></div></div>
     <div class="card"><h2>Berat stok (g)</h2><div class="chart-box"><canvas id="cBerat"></canvas></div></div>
     <div class="card"><h2>PWM blower (%)</h2><div class="chart-box"><canvas id="cPwm"></canvas></div></div>
   </div>
@@ -124,7 +124,7 @@
   <footer>
     <span id="sumber">Data dikirim ESP32 lewat internet lalu ditampilkan di halaman ini.</span>
     Ambang: CO₂ ≥ 1.500 ppm, suhu ruang ≥ 28 °C, udara masuk layak jika RH ≤ 70% dan suhunya minimal 3 °C di bawah suhu ruang (proposal Tabel 3.5).
-    Kadar air dari sensor kapasitif masih berupa pendekatan, bukan kadar air gabah terkalibrasi.
+    Soil moisture ditampilkan sebagai nilai mentah ADC (0–4095), belum dikonversi ke kadar air gabah.
   </footer>
 </div>
 
@@ -149,7 +149,7 @@ const FIELDS = {
 };
 const TILES = [
   { key: "co2", lbl: "CO₂", unit: "ppm", dec: 0 },
-  { key: "soil", lbl: "Kadar air (kapasitif)", unit: "%", dec: 0 },
+  { key: "soil", lbl: "Soil moisture (mentah)", unit: "", dec: 0 },
   { key: "berat", lbl: "Berat stok", unit: "g", dec: 1 },
   { key: "pwm", lbl: "PWM blower", unit: "%", dec: 0 },
   { key: "suhuDalam", lbl: "Suhu ruang dalam", unit: "°C", dec: 1 },
@@ -244,7 +244,7 @@ function dataDemo() {
     rows.push({
       t,
       co2: Math.round(620 + 900 * Math.sin(x * Math.PI) * (blower ? 0.6 : 1) + Math.random() * 30),
-      soil: Math.round(14 + 1.5 * Math.sin(x * 4) + Math.random()),
+      soil: Math.round(2100 + 80 * Math.sin(x * 4) + Math.random() * 20),
       berat: +(4980 - x * 6 + Math.random() * 2).toFixed(1),
       suhuDalam: +(27 + 2 * Math.sin(x * Math.PI) - (blower ? 1.2 : 0) + Math.random() * 0.2).toFixed(1),
       rhDalam: Math.round(68 + 5 * Math.sin(x * 3) + Math.random() * 2),
@@ -346,7 +346,7 @@ function siapkanChart() {
     co2: buatChart("cCo2", [{ key: "co2", label: "CO₂", color: "--s1" }]),
     suhu: buatChart("cSuhu", [{ key: "suhuDalam", label: "Ruang dalam", color: "--s1" }, { key: "suhuMasuk", label: "Udara masuk", color: "--s2" }]),
     rh: buatChart("cRh", [{ key: "rhDalam", label: "Ruang dalam", color: "--s1" }, { key: "rhMasuk", label: "Udara masuk", color: "--s2" }], { min: 0, max: 100 }),
-    soil: buatChart("cSoil", [{ key: "soil", label: "Kadar air", color: "--s1" }], { min: 0, max: 30 }),
+    soil: buatChart("cSoil", [{ key: "soil", label: "Soil mentah", color: "--s1" }]),
     berat: buatChart("cBerat", [{ key: "berat", label: "Berat", color: "--s1" }]),
     pwm: buatChart("cPwm", [{ key: "pwm", label: "PWM", color: "--s2" }], { min: 0, max: 100, stepped: true })
   };
