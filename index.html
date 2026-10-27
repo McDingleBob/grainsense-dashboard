@@ -97,7 +97,7 @@
     </div>
   </header>
 
-  <div class="demo" id="demo">Mode demo: angka di bawah adalah data contoh. Isi <b>CHANNEL_ID</b> di file <b>config.js</b> supaya dashboard membaca data asli dari ESP32.</div>
+  <div class="demo" id="demo">Mode demo: angka di bawah adalah data contoh. Atur <b>MODE</b> di file <b>config.js</b> supaya dashboard membaca data asli dari ESP32.</div>
 
   <div class="grid tiles" id="tiles"></div>
 
@@ -122,22 +122,27 @@
   </div>
 
   <footer>
-    Data dikirim ESP32 ke ThingSpeak lalu dibaca halaman ini tiap beberapa detik.
+    <span id="sumber">Data dikirim ESP32 lewat internet lalu ditampilkan di halaman ini.</span>
     Ambang: CO₂ ≥ 1.500 ppm, suhu ruang ≥ 28 °C, udara masuk layak jika RH ≤ 70% dan suhunya minimal 3 °C di bawah suhu ruang (proposal Tabel 3.5).
     Kadar air dari sensor kapasitif masih berupa pendekatan, bukan kadar air gabah terkalibrasi.
   </footer>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script src="config.js"></script>
 <script>
 Chart.defaults.locale = "id-ID";
-const CFG = Object.assign({ CHANNEL_ID: "", READ_API_KEY: "", REFRESH_DETIK: 20 }, window.GRAINSENSE || {});
-// Pengaturan juga bisa lewat alamat, contoh: .../?channel=2712345&key=ABCD
+const CFG = Object.assign({ MODE: "mqtt", MQTT_URL: "wss://broker.hivemq.com:8884/mqtt", MQTT_TOPIC: "",
+  CHANNEL_ID: "", READ_API_KEY: "", REFRESH_DETIK: 20 }, window.GRAINSENSE || {});
+// Pengaturan juga bisa lewat alamat, contoh: .../?channel=2712345 atau .../?topic=grainsense/abc atau .../?demo=1
 const qs = new URLSearchParams(location.search);
-if (qs.get("channel")) CFG.CHANNEL_ID = qs.get("channel");
+if (qs.get("channel")) { CFG.MODE = "thingspeak"; CFG.CHANNEL_ID = qs.get("channel"); }
 if (qs.get("key")) CFG.READ_API_KEY = qs.get("key");
-const DEMO = !CFG.CHANNEL_ID;
+if (qs.get("topic")) { CFG.MODE = "mqtt"; CFG.MQTT_TOPIC = qs.get("topic"); }
+if (qs.get("demo")) CFG.MODE = "demo";
+const MQTT = CFG.MODE === "mqtt" && CFG.MQTT_TOPIC && window.mqtt;
+const DEMO = !MQTT && !(CFG.MODE === "thingspeak" && CFG.CHANNEL_ID);
 
 const FIELDS = {
   co2: 1, soil: 2, berat: 3, suhuDalam: 4, rhDalam: 5, suhuMasuk: 6, rhMasuk: 7, pwm: 8
@@ -160,8 +165,53 @@ const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v
 const $ = (id) => document.getElementById(id);
 
 // ---------- Ambil data ----------
+// MQTT: data masuk disimpan di memori + browser (maks 24 jam) supaya grafik tetap ada saat halaman dibuka ulang
+const SIMPAN = "grainsense_riwayat_" + CFG.MQTT_TOPIC;
+let riwayat = [];
+let mqttStatus = "menghubungkan";
+
+function muatRiwayat() {
+  try {
+    const a = JSON.parse(localStorage.getItem(SIMPAN) || "[]");
+    riwayat = a.map((r) => Object.assign({}, r, { t: new Date(r.t) }));
+  } catch (e) { riwayat = []; }
+}
+
+function simpanRiwayat() {
+  const batas = Date.now() - 24 * 3600000;
+  riwayat = riwayat.filter((r) => r.t.getTime() >= batas);
+  try { localStorage.setItem(SIMPAN, JSON.stringify(riwayat.map((r) => Object.assign({}, r, { t: r.t.getTime() })))); } catch (e) {}
+}
+
+function mulaiMqtt() {
+  muatRiwayat();
+  const c = mqtt.connect(CFG.MQTT_URL, { clientId: "gs-web-" + Math.random().toString(16).slice(2, 10), reconnectPeriod: 5000 });
+  c.on("connect", () => { mqttStatus = "tersambung"; c.subscribe(CFG.MQTT_TOPIC); muat(); });
+  c.on("reconnect", () => { mqttStatus = "menghubungkan"; });
+  c.on("offline", () => { mqttStatus = "putus"; muat(); });
+  c.on("message", (topic, buf) => {
+    let d;
+    try { d = JSON.parse(typeof buf === "string" ? buf : new TextDecoder().decode(buf)); } catch (e) { return; }
+    // ts = waktu dari ESP32 (detik, lewat NTP). Kalau tidak ada, pakai waktu terima.
+    const t = d.ts > 1e9 ? new Date(d.ts * 1000) : new Date();
+    if (riwayat.some((r) => r.t.getTime() === t.getTime())) return;  // pesan retained yang sama
+    const row = { t };
+    for (const k in FIELDS) row[k] = typeof d[k] === "number" ? d[k] : null;
+    riwayat.push(row);
+    riwayat.sort((a, b) => a.t - b.t);
+    simpanRiwayat();
+    muat();
+  });
+}
+
 async function ambilData() {
   if (DEMO) return dataDemo();
+  if (MQTT) {
+    const batas = Date.now() - menit * 60000;
+    const rows = riwayat.filter((r) => r.t.getTime() >= batas);
+    // Kalau rentang ini kosong, tetap tampilkan nilai terakhir
+    return rows.length ? rows : riwayat.slice(-1);
+  }
   let url = `https://api.thingspeak.com/channels/${encodeURIComponent(CFG.CHANNEL_ID)}/feeds.json?minutes=${menit}&results=8000`;
   if (CFG.READ_API_KEY) url += `&api_key=${encodeURIComponent(CFG.READ_API_KEY)}`;
   const r = await fetch(url, { cache: "no-store" });
@@ -325,8 +375,14 @@ async function muat() {
     renderAerasi(now);
     renderCharts(rows);
     if (!rows.length) {
-      setStatus("bad", "Belum ada data");
-      $("updated").textContent = "Channel masih kosong. Pastikan ESP32 sudah mengirim data.";
+      if (MQTT && mqttStatus !== "tersambung") {
+        setStatus("warn", "Menghubungkan broker");
+        $("updated").textContent = "Menyambung ke " + CFG.MQTT_URL.replace(/^wss?:\/\//, "").split("/")[0] + "...";
+      } else {
+        setStatus("bad", "Belum ada data");
+        $("updated").textContent = MQTT ? "Tersambung ke broker. Menunggu data dari ESP32 di topik " + CFG.MQTT_TOPIC + "."
+          : "Channel masih kosong. Pastikan ESP32 sudah mengirim data.";
+      }
       return;
     }
     const last = rows[rows.length - 1].t;
@@ -335,6 +391,7 @@ async function muat() {
     else if (umur < 2 * 60000) setStatus("ok", "Online");
     else if (umur < 15 * 60000) setStatus("warn", "Data tertunda");
     else setStatus("bad", "Offline");
+    if (MQTT && mqttStatus === "putus") setStatus("bad", "Broker terputus");
     $("updated").textContent = "Data terakhir: " + last.toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "medium" }) + " (" + usia(umur) + ")";
   } catch (e) {
     setStatus("bad", "Gagal memuat");
@@ -351,6 +408,10 @@ $("range").addEventListener("click", (e) => {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { siapkanChart(); muat(); });
 
 if (DEMO) $("demo").style.display = "block";
+if (MQTT) {
+  mulaiMqtt();
+  $("sumber").textContent = "Data live dari ESP32 lewat MQTT (" + CFG.MQTT_TOPIC + "). Riwayat grafik disimpan di browser ini, maksimal 24 jam, dan hanya terisi selama halaman pernah dibuka.";
+} else if (!DEMO) $("sumber").textContent = "Data dikirim ESP32 ke ThingSpeak lalu dibaca halaman ini tiap beberapa detik.";
 siapkanChart();
 muat();
 setInterval(muat, Math.max(15, CFG.REFRESH_DETIK) * 1000);

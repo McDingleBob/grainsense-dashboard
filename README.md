@@ -2,8 +2,12 @@
 
 Dashboard online untuk prototipe GrainSense: CO₂, kadar air, berat stok, suhu dan kelembapan ruang dalam serta udara masuk, dan PWM blower.
 
-ESP32 mengirim data ke ThingSpeak tiap 20 detik, lalu halaman ini membacanya dan diperbarui otomatis.
+Buka: https://mcdinglebob.github.io/grainsense-dashboard/
 
-- Atur Channel ID di `config.js`. Kalau dibiarkan kosong, dashboard tampil dalam mode demo.
-- Bisa juga lewat alamat: `?channel=ID_CHANNEL`.
-- Jangan simpan Write API Key di repo ini. Kunci itu hanya untuk firmware ESP32.
+## Sumber data (atur di `config.js`)
+
+- `MODE: "mqtt"` (aktif sekarang): ESP32 mengirim JSON tiap 10 detik ke broker publik `broker.hivemq.com`, topik `grainsense/mcdinglebob/silo1`. Tidak perlu akun. Riwayat grafik disimpan di browser yang membuka dashboard (maksimal 24 jam).
+- `MODE: "thingspeak"`: isi `CHANNEL_ID`. Riwayat disimpan di server ThingSpeak.
+- `MODE: "demo"` atau `?demo=1`: data contoh.
+
+Broker publik bisa dibaca siapa saja yang tahu topiknya, jadi jangan kirim data rahasia. Jangan simpan Write API Key ThingSpeak di repo ini.
