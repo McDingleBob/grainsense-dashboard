@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard GrainSense</title>
+<meta name="description" content="Monitoring stok, kadar air, CO2, suhu dan kelembapan silo GrainSense secara online.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f6f3;
+    --card: #ffffff;
+    --text: #18211b;
+    --muted: #5f6b63;
+    --line: #e1e6e1;
+    --accent: #2f7d4f;
+    --s1: #2f7d4f;
+    --s2: #c27a1a;
+    --ok: #2f7d4f;
+    --warn: #b7791f;
+    --bad: #c0392b;
+    --ok-bg: #e5f2e9;
+    --warn-bg: #fbf0dc;
+    --bad-bg: #f9e3e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111613; --card: #1a211c; --text: #e7ece8; --muted: #9aa69e; --line: #2a332d;
+      --accent: #5cc184; --s1: #5cc184; --s2: #e6a23c;
+      --ok: #5cc184; --warn: #e6a23c; --bad: #ef6b5b;
+      --ok-bg: #1d3325; --warn-bg: #3a2e17; --bad-bg: #3d1f1b;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111613; --card: #1a211c; --text: #e7ece8; --muted: #9aa69e; --line: #2a332d;
+    --accent: #5cc184; --s1: #5cc184; --s2: #e6a23c;
+    --ok: #5cc184; --warn: #e6a23c; --bad: #ef6b5b;
+    --ok-bg: #1d3325; --warn-bg: #3a2e17; --bad-bg: #3d1f1b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; font-size: 13px; font-weight: 500; background: var(--card); border: 1px solid var(--line); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pill.ok { background: var(--ok-bg); border-color: transparent; color: var(--ok); } .pill.ok .dot { background: var(--ok); }
+  .pill.warn { background: var(--warn-bg); border-color: transparent; color: var(--warn); } .pill.warn .dot { background: var(--warn); }
+  .pill.bad { background: var(--bad-bg); border-color: transparent; color: var(--bad); } .pill.bad .dot { background: var(--bad); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); }
+  .seg button { border: 0; background: none; color: var(--muted); padding: 6px 11px; font: inherit; font-size: 13px; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .demo { background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 10px 14px; font-size: 14px; margin-bottom: 16px; display: none; }
+  .grid { display: grid; gap: 12px; }
+  .tiles { grid-template-columns: repeat(4, 1fr); margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+  .tile .lbl { color: var(--muted); font-size: 13px; }
+  .tile .val { font-size: 28px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .tile .val small { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 3px; }
+  .tile .note { font-size: 12px; margin-top: 4px; color: var(--muted); }
+  .tile .note.ok { color: var(--ok); } .tile .note.warn { color: var(--warn); } .tile .note.bad { color: var(--bad); }
+  .aer { grid-template-columns: 1fr; margin-bottom: 12px; }
+  .aer .card { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: center; }
+  .aer h2, .charts h2 { font-size: 14px; margin: 0; font-weight: 600; }
+  .aer .items { display: flex; flex-wrap: wrap; gap: 8px; }
+  .charts { grid-template-columns: repeat(2, 1fr); }
+  .chart-box { position: relative; height: 220px; margin-top: 8px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 20px; line-height: 1.6; }
+  @media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, 1fr); } .charts { grid-template-columns: 1fr; } }
+  @media (max-width: 420px) { .tile .val { font-size: 23px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Grain<span>Sense</span> · Silo 1</h1>
+      <div class="sub" id="updated">Memuat data...</div>
+    </div>
+    <div class="bar">
+      <span class="pill" id="status"><span class="dot"></span><span id="statusText">Menghubungkan</span></span>
+      <div class="seg" id="range">
+        <button data-min="60">1 jam</button>
+        <button data-min="360" class="on">6 jam</button>
+        <button data-min="1440">24 jam</button>
+        <button data-min="10080">7 hari</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="demo" id="demo">Mode demo: angka di bawah adalah data contoh. Isi <b>CHANNEL_ID</b> di file <b>config.js</b> supaya dashboard membaca data asli dari ESP32.</div>
+
+  <div class="grid tiles" id="tiles"></div>
+
+  <div class="grid aer">
+    <div class="card">
+      <h2>Status aerasi (Tabel 3.5)</h2>
+      <div class="items" id="aerasi"></div>
+    </div>
+  </div>
+
+  <div class="grid charts">
+    <div class="card"><h2>CO₂ (ppm)</h2><div class="chart-box"><canvas id="cCo2"></canvas></div></div>
+    <div class="card"><h2>Suhu (°C)</h2>
+      <div class="legend"><span><i style="background:var(--s1)"></i>Ruang dalam</span><span><i style="background:var(--s2)"></i>Udara masuk</span></div>
+      <div class="chart-box"><canvas id="cSuhu"></canvas></div></div>
+    <div class="card"><h2>Kelembapan udara (%RH)</h2>
+      <div class="legend"><span><i style="background:var(--s1)"></i>Ruang dalam</span><span><i style="background:var(--s2)"></i>Udara masuk</span></div>
+      <div class="chart-box"><canvas id="cRh"></canvas></div></div>
+    <div class="card"><h2>Kadar air, sensor kapasitif (%)</h2><div class="chart-box"><canvas id="cSoil"></canvas></div></div>
+    <div class="card"><h2>Berat stok (g)</h2><div class="chart-box"><canvas id="cBerat"></canvas></div></div>
+    <div class="card"><h2>PWM blower (%)</h2><div class="chart-box"><canvas id="cPwm"></canvas></div></div>
+  </div>
+
+  <footer>
+    Data dikirim ESP32 ke ThingSpeak lalu dibaca halaman ini tiap beberapa detik.
+    Ambang: CO₂ ≥ 1.500 ppm, suhu ruang ≥ 28 °C, udara masuk layak jika RH ≤ 70% dan suhunya minimal 3 °C di bawah suhu ruang (proposal Tabel 3.5).
+    Kadar air dari sensor kapasitif masih berupa pendekatan, bukan kadar air gabah terkalibrasi.
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="config.js"></script>
+<script>
+Chart.defaults.locale = "id-ID";
+const CFG = Object.assign({ CHANNEL_ID: "", READ_API_KEY: "", REFRESH_DETIK: 20 }, window.GRAINSENSE || {});
+// Pengaturan juga bisa lewat alamat, contoh: .../?channel=2712345&key=ABCD
+const qs = new URLSearchParams(location.search);
+if (qs.get("channel")) CFG.CHANNEL_ID = qs.get("channel");
+if (qs.get("key")) CFG.READ_API_KEY = qs.get("key");
+const DEMO = !CFG.CHANNEL_ID;
+
+const FIELDS = {
+  co2: 1, soil: 2, berat: 3, suhuDalam: 4, rhDalam: 5, suhuMasuk: 6, rhMasuk: 7, pwm: 8
+};
+const TILES = [
+  { key: "co2", lbl: "CO₂", unit: "ppm", dec: 0 },
+  { key: "soil", lbl: "Kadar air (kapasitif)", unit: "%", dec: 0 },
+  { key: "berat", lbl: "Berat stok", unit: "g", dec: 1 },
+  { key: "pwm", lbl: "PWM blower", unit: "%", dec: 0 },
+  { key: "suhuDalam", lbl: "Suhu ruang dalam", unit: "°C", dec: 1 },
+  { key: "rhDalam", lbl: "RH ruang dalam", unit: "%", dec: 0 },
+  { key: "suhuMasuk", lbl: "Suhu udara masuk", unit: "°C", dec: 1 },
+  { key: "rhMasuk", lbl: "RH udara masuk", unit: "%", dec: 0 }
+];
+
+let menit = 360;
+let charts = {};
+
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const $ = (id) => document.getElementById(id);
+
+// ---------- Ambil data ----------
+async function ambilData() {
+  if (DEMO) return dataDemo();
+  let url = `https://api.thingspeak.com/channels/${encodeURIComponent(CFG.CHANNEL_ID)}/feeds.json?minutes=${menit}&results=8000`;
+  if (CFG.READ_API_KEY) url += `&api_key=${encodeURIComponent(CFG.READ_API_KEY)}`;
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  if (j === -1 || !j.feeds) throw new Error("Channel tidak bisa dibaca (cek CHANNEL_ID / READ_API_KEY / channel Public)");
+  let feeds = j.feeds;
+  // Kalau tidak ada data di rentang ini, tetap tampilkan nilai terakhir
+  if (!feeds.length) {
+    let u2 = `https://api.thingspeak.com/channels/${encodeURIComponent(CFG.CHANNEL_ID)}/feeds.json?results=1`;
+    if (CFG.READ_API_KEY) u2 += `&api_key=${encodeURIComponent(CFG.READ_API_KEY)}`;
+    const j2 = await (await fetch(u2, { cache: "no-store" })).json();
+    feeds = (j2 && j2.feeds) || [];
+  }
+  return feeds.map((f) => {
+    const row = { t: new Date(f.created_at) };
+    for (const k in FIELDS) {
+      const v = f["field" + FIELDS[k]];
+      row[k] = v === null || v === undefined || v === "" ? null : parseFloat(v);
+    }
+    return row;
+  });
+}
+
+function dataDemo() {
+  const rows = [], now = Date.now(), n = 200, step = menit * 60000 / n;
+  for (let i = 0; i < n; i++) {
+    const x = i / n, t = new Date(now - (n - i) * step);
+    const blower = x > 0.62 && x < 0.8;
+    rows.push({
+      t,
+      co2: Math.round(620 + 900 * Math.sin(x * Math.PI) * (blower ? 0.6 : 1) + Math.random() * 30),
+      soil: Math.round(14 + 1.5 * Math.sin(x * 4) + Math.random()),
+      berat: +(4980 - x * 6 + Math.random() * 2).toFixed(1),
+      suhuDalam: +(27 + 2 * Math.sin(x * Math.PI) - (blower ? 1.2 : 0) + Math.random() * 0.2).toFixed(1),
+      rhDalam: Math.round(68 + 5 * Math.sin(x * 3) + Math.random() * 2),
+      suhuMasuk: +(24.5 + 1.5 * Math.cos(x * 5) + Math.random() * 0.3).toFixed(1),
+      rhMasuk: Math.round(66 + 8 * Math.cos(x * 5) + Math.random() * 2),
+      pwm: blower ? 70 : 0
+    });
+  }
+  return rows;
+}
+
+// Nilai terakhir yang tidak kosong untuk tiap besaran
+function terakhir(rows, key) {
+  for (let i = rows.length - 1; i >= 0; i--) if (rows[i][key] !== null && !isNaN(rows[i][key])) return rows[i][key];
+  return null;
+}
+
+// ---------- Tampilan ----------
+function fmt(v, d) { return v === null ? "--" : v.toLocaleString("id-ID", { minimumFractionDigits: d, maximumFractionDigits: d }); }
+
+function catatan(key, v, now) {
+  if (v === null) return ["", "Belum ada data"];
+  if (key === "co2") return v >= 1500 ? ["bad", "Di atas 1.500 ppm, periksa silo"] : v >= 1000 ? ["warn", "Mulai naik"] : ["ok", "Normal"];
+  if (key === "suhuDalam") return v >= 28 ? ["warn", "≥ 28 °C, perlu aerasi"] : ["ok", "Normal"];
+  if (key === "rhMasuk") return v > 70 ? ["warn", "> 70%, kurang layak untuk aerasi"] : ["ok", "Layak untuk aerasi"];
+  if (key === "pwm") return v > 0 ? ["ok", "Blower menyala"] : ["", "Blower mati"];
+  return ["", ""];
+}
+
+function renderTiles(now) {
+  $("tiles").innerHTML = TILES.map((t) => {
+    const v = now[t.key];
+    const [cls, txt] = catatan(t.key, v);
+    return `<div class="card tile"><div class="lbl">${t.lbl}</div>
+      <div class="val">${fmt(v, t.dec)}<small>${v === null ? "" : t.unit}</small></div>
+      <div class="note ${cls}">${txt || "&nbsp;"}</div></div>`;
+  }).join("");
+}
+
+function pill(cls, txt) { return `<span class="pill ${cls}"><span class="dot"></span>${txt}</span>`; }
+
+function renderAerasi(n) {
+  const out = [];
+  const perluSuhu = n.suhuDalam !== null && n.suhuDalam >= 28;
+  const perluCo2 = n.co2 !== null && n.co2 >= 1500;
+  out.push(perluSuhu || perluCo2
+    ? pill("warn", "Aerasi diperlukan (" + [perluSuhu && "suhu", perluCo2 && "CO₂"].filter(Boolean).join(" + ") + ")")
+    : pill("ok", "Aerasi belum diperlukan"));
+  if (n.rhMasuk === null || n.suhuMasuk === null || n.suhuDalam === null) {
+    out.push(pill("", "Kelayakan udara masuk: data SHT3X belum lengkap"));
+  } else {
+    const layak = n.rhMasuk <= 70 && n.suhuMasuk <= n.suhuDalam - 3;
+    out.push(layak ? pill("ok", "Udara masuk layak") : pill("warn", "Udara masuk tidak layak"));
+  }
+  out.push(n.pwm > 0 ? pill("ok", `Blower menyala ${fmt(n.pwm, 0)}%`) : pill("", "Blower mati"));
+  $("aerasi").innerHTML = out.join("");
+}
+
+function setStatus(cls, txt) {
+  $("status").className = "pill " + cls;
+  $("statusText").textContent = txt;
+}
+
+function usia(ms) {
+  const d = Math.round(ms / 1000);
+  if (d < 60) return d + " detik lalu";
+  if (d < 3600) return Math.round(d / 60) + " menit lalu";
+  if (d < 86400) return Math.round(d / 3600) + " jam lalu";
+  return Math.round(d / 86400) + " hari lalu";
+}
+
+// ---------- Grafik ----------
+function buatChart(id, series, opts = {}) {
+  const ctx = $(id);
+  return new Chart(ctx, {
+    type: "line",
+    data: { datasets: series.map((s) => ({
+      label: s.label, data: [], borderColor: css(s.color), backgroundColor: css(s.color),
+      borderWidth: 2, pointRadius: 0, tension: 0.25, spanGaps: true, stepped: opts.stepped || false
+    })) },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        title: (it) => it.length ? new Date(it[0].parsed.x).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" }) : ""
+      } } },
+      scales: {
+        x: { type: "linear", grid: { display: false }, ticks: { color: css("--muted"), maxTicksLimit: 6,
+          callback: (v) => { const d = new Date(v); return menit > 1440 ? d.toLocaleDateString("id-ID", { day: "numeric", month: "short" }) : d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }); } } },
+        y: { grid: { color: css("--line") }, ticks: { color: css("--muted"), maxTicksLimit: 5 }, suggestedMin: opts.min, suggestedMax: opts.max }
+      }
+    }
+  });
+}
+
+function siapkanChart() {
+  Object.values(charts).forEach((c) => c.destroy());
+  charts = {
+    co2: buatChart("cCo2", [{ key: "co2", label: "CO₂", color: "--s1" }]),
+    suhu: buatChart("cSuhu", [{ key: "suhuDalam", label: "Ruang dalam", color: "--s1" }, { key: "suhuMasuk", label: "Udara masuk", color: "--s2" }]),
+    rh: buatChart("cRh", [{ key: "rhDalam", label: "Ruang dalam", color: "--s1" }, { key: "rhMasuk", label: "Udara masuk", color: "--s2" }], { min: 0, max: 100 }),
+    soil: buatChart("cSoil", [{ key: "soil", label: "Kadar air", color: "--s1" }], { min: 0, max: 30 }),
+    berat: buatChart("cBerat", [{ key: "berat", label: "Berat", color: "--s1" }]),
+    pwm: buatChart("cPwm", [{ key: "pwm", label: "PWM", color: "--s2" }], { min: 0, max: 100, stepped: true })
+  };
+  charts.co2.$keys = ["co2"]; charts.suhu.$keys = ["suhuDalam", "suhuMasuk"]; charts.rh.$keys = ["rhDalam", "rhMasuk"];
+  charts.soil.$keys = ["soil"]; charts.berat.$keys = ["berat"]; charts.pwm.$keys = ["pwm"];
+}
+
+function renderCharts(rows) {
+  const xmax = Date.now(), xmin = xmax - menit * 60000;
+  for (const c of Object.values(charts)) {
+    c.$keys.forEach((k, i) => {
+      c.data.datasets[i].data = rows.filter((r) => r[k] !== null).map((r) => ({ x: r.t.getTime(), y: r[k] }));
+    });
+    c.options.scales.x.min = xmin; c.options.scales.x.max = xmax;
+    c.update();
+  }
+}
+
+// ---------- Siklus ----------
+async function muat() {
+  try {
+    const rows = await ambilData();
+    const now = {};
+    for (const k in FIELDS) now[k] = terakhir(rows, k);
+    renderTiles(now);
+    renderAerasi(now);
+    renderCharts(rows);
+    if (!rows.length) {
+      setStatus("bad", "Belum ada data");
+      $("updated").textContent = "Channel masih kosong. Pastikan ESP32 sudah mengirim data.";
+      return;
+    }
+    const last = rows[rows.length - 1].t;
+    const umur = Date.now() - last.getTime();
+    if (DEMO) setStatus("warn", "Mode demo");
+    else if (umur < 2 * 60000) setStatus("ok", "Online");
+    else if (umur < 15 * 60000) setStatus("warn", "Data tertunda");
+    else setStatus("bad", "Offline");
+    $("updated").textContent = "Data terakhir: " + last.toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "medium" }) + " (" + usia(umur) + ")";
+  } catch (e) {
+    setStatus("bad", "Gagal memuat");
+    $("updated").textContent = "Gagal mengambil data: " + e.message;
+  }
+}
+
+$("range").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  [...$("range").children].forEach((x) => x.classList.toggle("on", x === b));
+  menit = +b.dataset.min;
+  muat();
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { siapkanChart(); muat(); });
+
+if (DEMO) $("demo").style.display = "block";
+siapkanChart();
+muat();
+setInterval(muat, Math.max(15, CFG.REFRESH_DETIK) * 1000);
+</script>
+</body>
+</html>
