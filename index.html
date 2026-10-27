@@ -212,28 +212,58 @@ async function ambilData() {
     // Kalau rentang ini kosong, tetap tampilkan nilai terakhir
     return rows.length ? rows : riwayat.slice(-1);
   }
-  let url = `https://api.thingspeak.com/channels/${encodeURIComponent(CFG.CHANNEL_ID)}/feeds.json?minutes=${menit}&results=8000`;
+  // ThingSpeak kadang membalas permintaan riwayat yang besar dengan data cache yang
+  // sudah beberapa menit. Karena itu: riwayat diambil jarang (tiap 5 menit / ganti rentang),
+  // data terbaru diambil tiap siklus dengan permintaan kecil, lalu keduanya digabung per entry_id.
+  // Gabungan disimpan di browser supaya setelah refresh tidak mundur ke data lama.
+  const sekarang = Date.now();
+  if (menit !== tsMenit || sekarang - tsWaktuRiwayat > 5 * 60000) {
+    const feeds = await ambilFeeds(`minutes=${menit}&results=8000`);
+    feeds.forEach(gabungFeed);
+    tsMenit = menit;
+    tsWaktuRiwayat = sekarang;
+  }
+  (await ambilFeeds("results=20")).forEach(gabungFeed);
+  simpanTs();
+  const batas = sekarang - menit * 60000;
+  const semua = [...tsData.values()].sort((x, y) => x.t - y.t);
+  const rows = semua.filter((r) => r.t.getTime() >= batas);
+  // Kalau tidak ada data di rentang ini, tetap tampilkan nilai terakhir
+  return rows.length ? rows : semua.slice(-1);
+}
+
+const TS_SIMPAN = "grainsense_ts_" + CFG.CHANNEL_ID;
+const tsData = new Map();  // entry_id -> baris data
+let tsMenit = null, tsWaktuRiwayat = 0;
+
+try {
+  JSON.parse(localStorage.getItem(TS_SIMPAN) || "[]").forEach((r) => tsData.set(r.id, Object.assign({}, r, { t: new Date(r.t) })));
+} catch (e) {}
+
+function simpanTs() {
+  // Simpan maksimal 8000 entri terbaru
+  const a = [...tsData.values()].sort((x, y) => x.t - y.t).slice(-8000);
+  if (a.length < tsData.size) { tsData.clear(); a.forEach((r) => tsData.set(r.id, r)); }
+  try { localStorage.setItem(TS_SIMPAN, JSON.stringify(a.map((r) => Object.assign({}, r, { t: r.t.getTime() })))); } catch (e) {}
+}
+
+async function ambilFeeds(param) {
+  let url = `https://api.thingspeak.com/channels/${encodeURIComponent(CFG.CHANNEL_ID)}/feeds.json?${param}&_=${Date.now()}`;
   if (CFG.READ_API_KEY) url += `&api_key=${encodeURIComponent(CFG.READ_API_KEY)}`;
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) throw new Error("HTTP " + r.status);
   const j = await r.json();
   if (j === -1 || !j.feeds) throw new Error("Channel tidak bisa dibaca (cek CHANNEL_ID / READ_API_KEY / channel Public)");
-  let feeds = j.feeds;
-  // Kalau tidak ada data di rentang ini, tetap tampilkan nilai terakhir
-  if (!feeds.length) {
-    let u2 = `https://api.thingspeak.com/channels/${encodeURIComponent(CFG.CHANNEL_ID)}/feeds.json?results=1`;
-    if (CFG.READ_API_KEY) u2 += `&api_key=${encodeURIComponent(CFG.READ_API_KEY)}`;
-    const j2 = await (await fetch(u2, { cache: "no-store" })).json();
-    feeds = (j2 && j2.feeds) || [];
+  return j.feeds;
+}
+
+function gabungFeed(f) {
+  const row = { id: f.entry_id, t: new Date(f.created_at) };
+  for (const k in FIELDS) {
+    const v = f["field" + FIELDS[k]];
+    row[k] = v === null || v === undefined || v === "" ? null : parseFloat(v);
   }
-  return feeds.map((f) => {
-    const row = { t: new Date(f.created_at) };
-    for (const k in FIELDS) {
-      const v = f["field" + FIELDS[k]];
-      row[k] = v === null || v === undefined || v === "" ? null : parseFloat(v);
-    }
-    return row;
-  });
+  tsData.set(row.id, row);
 }
 
 function dataDemo() {
