@@ -179,7 +179,7 @@ function muatRiwayat() {
 
 function simpanRiwayat() {
   const batas = Date.now() - 24 * 3600000;
-  riwayat = riwayat.filter((r) => r.t.getTime() >= batas);
+  riwayat = riwayat.filter((r) => r.t.getTime() >= batas).slice(-8000);  // batasi ukuran simpanan
   try { localStorage.setItem(SIMPAN, JSON.stringify(riwayat.map((r) => Object.assign({}, r, { t: r.t.getTime() })))); } catch (e) {}
 }
 

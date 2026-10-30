@@ -5,7 +5,7 @@
 //   "thingspeak" = data dari channel ThingSpeak (riwayat tersimpan di server).
 //   "demo"       = data contoh.
 window.GRAINSENSE = {
-  MODE: "thingspeak",
+  MODE: "mqtt",
 
   // MQTT: harus sama persis dengan MQTT_TOPIC di firmware GrainSense_MQTT.ino
   MQTT_URL: "wss://broker.hivemq.com:8884/mqtt",

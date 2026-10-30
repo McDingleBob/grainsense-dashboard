@@ -1,6 +1,6 @@
 /*
   GrainSense MQTT - kirim data sensor lewat MQTT (broker publik HiveMQ,
-  tanpa daftar akun) supaya bisa dilihat di dashboard online:
+  tanpa daftar akun) ke dashboard online:
   https://mcdinglebob.github.io/grainsense-dashboard/
 
   Board : DOIT ESP32 DEVKIT V1 (ESP32 Arduino core 2.x atau 3.x)
@@ -14,15 +14,19 @@
   dashboard tampil "--". Jadi sketch ini bisa dipakai sekarang (baru CO2 +
   soil moisture) maupun nanti saat semua modul sudah terpasang.
 
-  Data dikirim sebagai JSON ke topik MQTT_TOPIC, contoh:
-    {"ts":1793078400,"co2":612,"soil":15,"berat":4980.2,"suhuDalam":27.4,
+  Data dikirim sebagai JSON ke topik MQTT_TOPIC tiap 5 detik, contoh:
+    {"ts":1793078400,"co2":612,"soil":3276,"berat":480.2,"suhuDalam":27.4,
      "rhDalam":68.1,"suhuMasuk":25.0,"rhMasuk":66.0,"pwm":0}
-  ts = waktu (detik sejak 1970, dari internet/NTP).
+  ts = waktu (detik sejak 1970, dari internet/NTP). soil = nilai mentah ADC.
 
   Serial Monitor: 115200 baud, line ending "New Line".
   Perintah:
-    t        tare (nol-kan) load cell
-    f-21.5   pakai faktor kalibrasi load cell (lihat GrainSense_Tes)
+    t        tare (nol-kan) load cell, kosongkan wadah dulu
+    500      kalibrasi load cell: taruh benda 500 g lalu ketik 500
+             (angka = berat benda dalam gram)
+    f-21.5   pakai faktor kalibrasi yang sudah dicatat
+    Hasil tare dan kalibrasi disimpan di memori ESP32, jadi tidak hilang
+    saat ESP32 mati atau di-reset.
     p50      PWM blower 50% (0-100)
     zero     kalibrasi nol MH-Z19C (= 400 ppm), HANYA di udara luar
              setelah sensor menyala minimal 20 menit
@@ -32,6 +36,7 @@
 #include <PubSubClient.h>
 #include <time.h>
 #include <Wire.h>
+#include <Preferences.h>
 #include "HX711.h"
 #include "Adafruit_SHT31.h"
 
@@ -44,24 +49,28 @@ const char *MQTT_HOST  = "broker.hivemq.com";
 const int   MQTT_PORT  = 1883;
 const char *MQTT_TOPIC = "grainsense/mcdinglebob/silo1";
 
-const unsigned long INTERVAL_KIRIM = 10000UL;  // kirim tiap 10 detik
+const unsigned long INTERVAL_KIRIM = 5000UL;  // kirim tiap 5 detik
 
 // ===== Pin (sesuai Wiring GrainSense) =====
 const int DT_PIN    = 16;  // HX711 DT
 const int SCK_PIN   = 17;  // HX711 SCK
 const int SDA_PIN   = 21;  // SHT3X #1 ruang dalam
 const int SCL_PIN   = 22;
-const int SDA2_PIN  = 19;  // SHT3X #2 udara masuk
+// SHT3X #2 udara masuk bisa dipasang dengan salah satu cara:
+//  a) di bus yang sama (GPIO21/22) dengan pin AD/ADR ke 3V3 -> alamat 0x45
+//  b) di bus kedua GPIO19 (SDA) / GPIO18 (SCL) -> alamat 0x44
+// Firmware mencoba keduanya otomatis.
+const int SDA2_PIN  = 19;
 const int SCL2_PIN  = 18;
 const int CO2_RX    = 4;   // ESP32 RX  <- TX MH-Z19C
 const int CO2_TX    = 15;  // ESP32 TX  -> RX MH-Z19C
 const int SOIL_PIN  = 34;  // AOUT soil moisture
 const int PWM_PIN   = 26;  // PWM/TRIG modul MOSFET
 
-// ===== Kalibrasi (isi dari hasil GrainSense_Tes / Tes_CO2_Soil) =====
-int   SOIL_KERING = 3000;  // nilai mentah sensor di udara
-int   SOIL_BASAH  = 1300;  // nilai mentah sensor di air
-float FAKTOR_HX   = 0;     // faktor load cell, 0 = belum dikalibrasi
+// ===== Kalibrasi load cell =====
+// 0 = pakai hasil kalibrasi yang tersimpan di ESP32 (perintah 500 / f...)
+// Kalau sudah punya angka dari GrainSense_Tes, boleh langsung diisi di sini.
+float FAKTOR_HX = 0;
 const bool CO2_ABC = false;
 
 // ===== PWM =====
@@ -72,8 +81,11 @@ int dutyPersen = 0;
 
 HX711 scale;
 Adafruit_SHT31 shtDalam(&Wire);
-Adafruit_SHT31 shtMasuk(&Wire1);
+Adafruit_SHT31 shtMasukA(&Wire);   // cara a: bus 21/22, alamat 0x45
+Adafruit_SHT31 shtMasukB(&Wire1);  // cara b: bus 19/18, alamat 0x44
+Adafruit_SHT31 *shtMasuk = &shtMasukA;
 HardwareSerial co2Serial(2);
+Preferences memori;
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 
@@ -204,14 +216,12 @@ void bacaDanKirim() {
     if (millis() - waktuMulai < 180000UL) Serial.print(" (pemanasan)");
   } else Serial.print("--");
 
+  // Soil dikirim sebagai nilai mentah ADC (0-4095): makin basah, makin kecil
   int soil = bacaSoil();
-  int persen = constrain(map(soil, SOIL_KERING, SOIL_BASAH, 0, 100), 0, 100);
+  tambah(json, "soil", soil, 0);
   Serial.print(" | Soil: ");
-  if (soil >= 50 && soil <= 4050) {
-    tambah(json, "soil", persen, 0);
-    Serial.print(persen);
-    Serial.print("%");
-  } else Serial.print("-- (cek kabel AOUT->D34)");
+  Serial.print(soil);
+  if (soil < 50) Serial.print(" (terlalu kecil, cek AOUT->D34 dan VCC)");
 
   Serial.print(" | Berat: ");
   if (adaHX && FAKTOR_HX != 0 && scale.wait_ready_timeout(200)) {
@@ -219,7 +229,13 @@ void bacaDanKirim() {
     tambah(json, "berat", g, 1);
     Serial.print(g, 1);
     Serial.print(" g");
-  } else Serial.print("--");
+  } else if (adaHX && scale.wait_ready_timeout(200)) {
+    // Belum dikalibrasi: tampilkan angka mentah supaya kelihatan sensornya merespons
+    Serial.print("-- (belum dikalibrasi, mentah: ");
+    Serial.print(scale.get_value(5), 0);
+    Serial.print(")");
+  } else if (adaHX) Serial.print("-- (HX711 tidak menjawab)");
+  else Serial.print("--");
 
   Serial.print(" | Dalam: ");
   if (adaDalam) {
@@ -231,29 +247,40 @@ void bacaDanKirim() {
 
   Serial.print(" | Masuk: ");
   if (adaMasuk) {
-    float t = shtMasuk.readTemperature(), h = shtMasuk.readHumidity();
+    float t = shtMasuk->readTemperature(), h = shtMasuk->readHumidity();
     if (!isnan(t)) tambah(json, "suhuMasuk", t, 1);
     if (!isnan(h)) tambah(json, "rhMasuk", h, 1);
     Serial.print(t, 1); Serial.print("C "); Serial.print(h, 0); Serial.print("%");
   } else Serial.print("--");
 
   tambah(json, "pwm", dutyPersen, 0);
-  json += "}";
   Serial.print(" | PWM: ");
   Serial.print(dutyPersen);
   Serial.println("%");
 
+  json += "}";
+
   if (!mqttClient.connected()) {
-    Serial.println(">> Tidak terkirim: belum tersambung ke WiFi/broker.");
+    Serial.println(">> Tidak terkirim: belum tersambung ke WiFi/broker MQTT.");
     return;
   }
   // retained = true: dashboard yang baru dibuka langsung dapat nilai terakhir
   if (mqttClient.publish(MQTT_TOPIC, json.c_str(), true)) {
-    Serial.print(">> Terkirim: ");
+    Serial.print(">> Terkirim MQTT: ");
     Serial.println(json);
   } else {
     Serial.println(">> Gagal kirim MQTT.");
   }
+}
+
+// ---------- Load cell ----------
+void pakaiFaktor(float f) {
+  FAKTOR_HX = f;
+  scale.set_scale(f);
+  memori.putFloat("faktor", f);
+  Serial.print(">> Faktor kalibrasi: ");
+  Serial.print(f, 4);
+  Serial.println(" (disimpan di ESP32)");
 }
 
 // ---------- Perintah Serial ----------
@@ -264,14 +291,27 @@ void prosesPerintah(String in) {
   if (in == "t" || in == "T") {
     if (!adaHX) { Serial.println(">> HX711 tidak terdeteksi."); return; }
     scale.tare(20);
-    Serial.println(">> Tare selesai.");
+    memori.putLong("offset", scale.get_offset());
+    Serial.println(">> Tare selesai dan disimpan.");
   } else if (c == 'f' || c == 'F') {
     float f = in.substring(1).toFloat();
     if (f == 0) { Serial.println(">> Faktor tidak valid."); return; }
-    FAKTOR_HX = f;
-    scale.set_scale(f);
-    Serial.print(">> Faktor dipakai: ");
-    Serial.println(f, 4);
+    pakaiFaktor(f);
+  } else if (isDigit(c)) {
+    // Kalibrasi: benda dengan berat diketahui sudah ditaruh di load cell
+    float beratAsli = in.toFloat();
+    if (!adaHX) { Serial.println(">> HX711 tidak terdeteksi."); return; }
+    if (beratAsli <= 0) { Serial.println(">> Berat tidak valid."); return; }
+    float nilai = scale.get_value(20);
+    Serial.print(">> Angka mentah dengan benda: ");
+    Serial.println(nilai, 0);
+    if (abs(nilai) < 100) {
+      Serial.println(">> Hampir 0, load cell tidak merasakan bendanya.");
+      Serial.println(">> Kemungkinan: tare (t) dilakukan saat benda masih di atas, atau kabel E+/E-/A+/A- load cell ke HX711 salah/longgar.");
+      Serial.println(">> Coba: angkat benda, ketik t, taruh benda lagi, tunggu angka mentah berubah, lalu ketik beratnya.");
+      return;
+    }
+    pakaiFaktor(nilai / beratAsli);
   } else if (c == 'p' || c == 'P') {
     setDuty(in.substring(1).toInt());
   } else if (in == "zero") {
@@ -282,8 +322,19 @@ void prosesPerintah(String in) {
     kirimCO2(0x87, 0x00);
     Serial.println(">> Kalibrasi nol CO2 dikirim. Titik sekarang dianggap 400 ppm.");
   } else {
-    Serial.println(">> Perintah: t | f<faktor> | p<0-100> | zero");
+    Serial.println(">> Perintah: t | <berat gram, mis. 500> | f<faktor> | p<0-100> | zero");
   }
+}
+
+// Tampilkan alamat I2C yang terdeteksi di bus 21/22 (0x44 = SHT AD ke GND, 0x45 = SHT AD ke 3V3)
+void scanI2C() {
+  Serial.print("Scan I2C GPIO21/22: ");
+  int n = 0;
+  for (byte a = 1; a < 127; a++) {
+    Wire.beginTransmission(a);
+    if (Wire.endTransmission() == 0) { Serial.print("0x"); Serial.print(a, HEX); Serial.print(" "); n++; }
+  }
+  Serial.println(n ? "" : "tidak ada perangkat");
 }
 
 // ---------- Setup ----------
@@ -311,17 +362,39 @@ void setup() {
   kirimCO2(0x79, CO2_ABC ? 0xA0 : 0x00);
 
   adaDalam = shtDalam.begin(0x44);
-  adaMasuk = shtMasuk.begin(0x44);
+  if (shtMasukA.begin(0x45)) {
+    adaMasuk = true; shtMasuk = &shtMasukA;
+    Serial.println("SHT3X udara masuk: GPIO21/22 alamat 0x45 (pin AD ke 3V3)");
+  } else if (shtMasukB.begin(0x44)) {
+    adaMasuk = true; shtMasuk = &shtMasukB;
+    Serial.println("SHT3X udara masuk: GPIO19/18 alamat 0x44");
+  }
+  scanI2C();
   adaHX = scale.wait_ready_timeout(1000);
   Serial.println(adaDalam ? "[OK] SHT3X ruang dalam" : "[--] SHT3X ruang dalam tidak terpasang");
   Serial.println(adaMasuk ? "[OK] SHT3X udara masuk" : "[--] SHT3X udara masuk tidak terpasang");
   Serial.println(adaHX ? "[OK] HX711" : "[--] HX711 tidak terpasang");
   Serial.println(bacaCO2() >= 0 ? "[OK] MH-Z19C" : "[--] MH-Z19C tidak menjawab (cek Vin 5V, TX->D4, RX->D15)");
 
+  memori.begin("grainsense", false);
   if (adaHX) {
-    scale.tare(20);
-    if (FAKTOR_HX != 0) scale.set_scale(FAKTOR_HX);
-    else Serial.println("Load cell belum dikalibrasi: berat tidak dikirim. Isi FAKTOR_HX.");
+    // Pakai titik nol yang tersimpan supaya stok di silo tidak ikut di-nol-kan saat reset
+    if (memori.isKey("offset")) {
+      scale.set_offset(memori.getLong("offset"));
+      Serial.println("Load cell: titik nol (tare) dari memori.");
+    } else {
+      Serial.println("Load cell: tare pertama, pastikan wadah kosong...");
+      scale.tare(20);
+      memori.putLong("offset", scale.get_offset());
+    }
+    if (FAKTOR_HX == 0) FAKTOR_HX = memori.getFloat("faktor", 0);
+    if (FAKTOR_HX != 0) {
+      scale.set_scale(FAKTOR_HX);
+      Serial.print("Load cell: faktor kalibrasi ");
+      Serial.println(FAKTOR_HX, 4);
+    } else {
+      Serial.println("Load cell belum dikalibrasi: taruh benda yang beratnya diketahui, lalu ketik beratnya (gram), mis. 500.");
+    }
   }
 
   mulaiWiFi();
